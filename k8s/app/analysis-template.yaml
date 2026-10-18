@@ -1,0 +1,36 @@
+# The automated "judge" of a release. Argo Rollouts runs these Prometheus
+# queries every 20s against ONLY the canary pods (selected by pod-template-hash).
+apiVersion: argoproj.io/v1alpha1
+kind: AnalysisTemplate
+metadata:
+  name: canary-health
+spec:
+  args:
+    - name: canary-hash
+  metrics:
+    # Fail the release if more than 5% of canary requests return 5xx.
+    - name: error-ratio
+      interval: 20s
+      initialDelay: 40s
+      failureLimit: 1
+      successCondition: result[0] < 0.05
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            (
+              sum(rate(http_requests_total{rollouts_pod_template_hash="{{args.canary-hash}}",status=~"5.."}[30s]))
+              /
+              sum(rate(http_requests_total{rollouts_pod_template_hash="{{args.canary-hash}}"}[30s]))
+            ) or vector(0)
+    # Guard against a false pass: the canary must actually be receiving traffic.
+    - name: canary-receives-traffic
+      interval: 20s
+      initialDelay: 40s
+      failureLimit: 2
+      successCondition: result[0] > 0
+      provider:
+        prometheus:
+          address: http://prometheus.monitoring.svc.cluster.local:9090
+          query: |
+            sum(rate(http_requests_total{rollouts_pod_template_hash="{{args.canary-hash}}"}[30s])) or vector(0)

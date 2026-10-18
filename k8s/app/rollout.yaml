@@ -1,0 +1,56 @@
+# An Argo Rollout replaces a normal Deployment. Same pod template, but the
+# "strategy" describes HOW a new version is released.
+apiVersion: argoproj.io/v1alpha1
+kind: Rollout
+metadata:
+  name: demo-app
+spec:
+  replicas: 5
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels:
+      app: demo-app
+  strategy:
+    canary:
+      # Pods are split by replica count: 20% of 5 pods = 1 canary pod.
+      steps:
+        - setWeight: 20
+        - pause: { duration: 60s }
+        - setWeight: 60
+        - pause: { duration: 60s }
+        # After the last step the new version gets 100% automatically.
+      # Runs in the background while the steps progress. If it fails, the
+      # rollout is aborted and traffic goes back to the old version.
+      analysis:
+        templates:
+          - templateName: canary-health
+        args:
+          - name: canary-hash
+            valueFrom:
+              podTemplateHash: Latest
+  template:
+    metadata:
+      labels:
+        app: demo-app
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8080"
+    spec:
+      containers:
+        - name: app
+          # scripts/release.sh edits this tag. Git is the source of truth.
+          image: demo-app:v1
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8080
+            periodSeconds: 3
+          resources:
+            requests:
+              cpu: 25m
+              memory: 32Mi
+            limits:
+              memory: 128Mi

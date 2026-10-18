@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Unit tests
+        run: python -m unittest discover -s tests -v
+      - name: Manifests are valid YAML
+        run: |
+          pip install pyyaml
+          python - <<'EOF'
+          import glob, yaml
+          files = glob.glob("k8s/**/*.yaml", recursive=True) + glob.glob("argocd/*.yaml")
+          for f in files:
+              list(yaml.safe_load_all(open(f)))
+              print("ok", f)
+          EOF
+      - name: Image builds
+        run: docker build -t demo-app:ci .
+      - name: Shell scripts parse
+        run: for f in scripts/*.sh; do bash -n "$f"; done
